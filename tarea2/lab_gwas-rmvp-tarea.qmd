@@ -1,0 +1,164 @@
+---
+title: "Genome Wide Association Studies (GWAS)"
+author: "Pedro Manuel Rodriguez Grados"
+format:
+  html:
+    toc: true
+    toc-location: left
+    number-sections: true
+    self-contained: true
+editor_options: 
+  chunk_output_type: console
+execute:
+  echo: false
+  warning: false
+---
+
+# Project Setup
+
+```{r}
+#| label:  setup
+
+source("https://inkaverse.com/docs.r")
+
+cran <- c("devtools", "tidyverse", "openxlsx", "rMVP", "CMplot")
+git <- c("hemstrow/snpR") 
+
+library(readxl)
+library(data.table)
+library(dplyr)
+library(ggplot2)
+
+
+
+suppressPackageStartupMessages({
+  for (pkg in cran) { 
+    if( !require(pkg, character.only = TRUE) ) {
+      install.packages(pkg)
+      library(pkg, character.only = TRUE)
+    } 
+  }
+  
+  for (pkg in git) {
+    if( !require(sub(".*/", "", pkg), character.only = TRUE) ) {
+      devtools::install_github(pkg, upgrade = TRUE)
+      library(sub(".*/", "", pkg), character.only = TRUE)
+    }
+  }
+}); remove(cran, git, pkg)
+
+cat("Project: ", getwd(), "\n")
+cat("cores: ", parallel::detectCores())
+cores <- parallel::detectCores()*0.8
+session_info()
+```
+
+# Reference
+
+
+
+# Tranformar datos
+
+```{bash}
+# ------------------------------------------------------------
+# 1. archivos
+# ------------------------------------------------------------
+table1 <- read_excel("C:/Users/pmrg1/OneDrive/Desktop/git/bamg/tarea2/data/Table 1.xlsx")
+
+table2 <- read_excel("C:/Users/pmrg1/OneDrive/Desktop/git/bamg/tarea2/data/Table 2.xlsx")
+
+data_geno <- fread("C:/Users/pmrg1/OneDrive/Desktop/git/bamg/tarea2/data/Data Sheet 1.CSV")
+
+# ------------------------------------------------------------
+# ==== 3. Explorar estructura ====
+cat("\nEstructura de archivos:\n")
+print(list(
+  Table1 = dim(table1),
+  Table2 = dim(table2),
+  Geno_Info = dim(geno_info)
+))
+
+# ==== 4. Combinar resultados GWAS (comparación de modelos) ====
+table1$Model <- "Model1"
+table2$Model <- "Model2"
+gwas_all <- bind_rows(table1, table2)
+
+# Asegurar formato correcto
+gwas_all <- gwas_all %>%
+  rename(P = `p-value`, CHR = Chr, POS = Pos) %>%
+  mutate(CHR = as.numeric(CHR), POS = as.numeric(POS)) %>%
+  filter(!is.na(P), P > 0, P < 1)
+
+# ==== 5. Graficar resultados GWAS ====
+CMplot(gwas_all,
+       plot.type = "m",
+       LOG10 = TRUE,
+       threshold = 0.05 / nrow(gwas_all), # umbral Bonferroni
+       threshold.col = "red",
+       col = c("steelblue4", "orange3"),
+       main = "Comparación de GWAS: Model1 vs Model2",
+       file = "jpg",
+       file.output = TRUE)
+
+# Distribución de p-values
+ggplot(gwas_all, aes(x = -log10(P), fill = Model)) +
+  geom_histogram(position = "identity", alpha = 0.6, bins = 40) +
+  theme_minimal(base_size = 13) +
+  labs(x = "-log10(p)", y = "Frecuencia",
+       title = "Distribución de valores p por modelo") +
+  scale_fill_manual(values = c("steelblue4", "orange3"))
+
+# ==== 6. Simulación de datos genotípicos y fenotípicos ====
+# (para mostrar flujo real de rMVP)
+set.seed(42)
+n.ind <- 100   # individuos simulados
+n.snp <- 5000  # SNPs simulados
+geno_sim <- matrix(sample(0:4, n.ind * n.snp, replace = TRUE), nrow = n.ind)
+pheno_sim <- data.frame(ID = paste0("clone_", 1:n.ind),
+                        Trait = rnorm(n.ind, mean = 30, sd = 5))
+
+# Guardar en formato MVP
+MVP.Data(fileVCF = NULL,
+         fileHMP = NULL,
+         fileNum = geno_sim,
+         filePhe = pheno_sim,
+         out = "potato_MVP",
+         sep.hapmap = "\t",
+         sep.phe = "\t")
+
+# ==== 7. Ejecutar GWAS con modelo mixto (MLM) ====
+# Crear matrices necesarias
+geno_path <- "potato_MVP.pgeno"
+pheno_path <- "potato_MVP.phe"
+
+# Cargar formato MVP
+genotype <- MVP.Data(fileNum = geno_path)
+phenotype <- read.table(pheno_path, header = TRUE)
+
+# Cálculo de matriz de relación kinship (K)
+K <- MVP.K.VanRaden(genotype)
+save(K, file = "potato_Kinship.rda")
+
+# Modelo mixto lineal
+MVP.GWAS(
+  phe = phenotype,
+  geno = genotype,
+  K = K,
+  method = "MLM",
+  permutation.threshold = TRUE,
+  nPC.GLM = 3,
+  priority = "speed",
+  file.output = TRUE,
+  outpath = "GWAS_results"
+)
+
+cat("C:/Users/pmrg1/OneDrive/Desktop/git/bamg/tarea2/data/GWAS_results")
+
+library(magick)
+
+img_path <- "C:/Users/pmrg1/OneDrive/Desktop/git/bamg/tarea2/data/GWAS_results/MVP.MLM.manhattan.jpg"
+img <- image_read(img_path)
+print(img)
+
+browseURL(img_path)
+
